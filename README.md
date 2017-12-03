@@ -188,12 +188,37 @@ PyLongObject所支持的操作
  2917 {
  2918     int result;
  2919     CHECK_BINOP(self, other);     // 检查是否是PyLong
- 2920     if (self == other)            // 
+ 2920     if (self == other)            // 是否指向同一个对象
  2921         result = 0;
  2922     else
- 2923         result = long_compare((PyLongObject*)self, (PyLongObject*)other);
+ 2923         result = long_compare((PyLongObject*)self, (PyLongObject*)other);   // 进行PyLongObject数据的比较
  2924     Py_RETURN_RICHCOMPARE(result, 0, op);
  2925 }
+
+
+ 2892 static int
+ 2893 long_compare(PyLongObject *a, PyLongObject *b)
+ 2894 {
+ 2895     Py_ssize_t sign;
+ 2896 
+ 2897     if (Py_SIZE(a) != Py_SIZE(b)) {
+ 2898     ¦   sign = Py_SIZE(a) - Py_SIZE(b);
+ 2899     }
+ 2900     else {
+ 2901     ¦   Py_ssize_t i = Py_ABS(Py_SIZE(a));
+ 2902     ¦   while (--i >= 0 && a->ob_digit[i] == b->ob_digit[i])
+ 2903     ¦   ¦   ;
+ 2904     ¦   if (i < 0)
+ 2905     ¦   ¦   sign = 0;
+ 2906     ¦   else {
+ 2907     ¦   ¦   sign = (sdigit)a->ob_digit[i] - (sdigit)b->ob_digit[i];
+ 2908     ¦   ¦   if (Py_SIZE(a) < 0)
+ 2909     ¦   ¦   ¦   sign = -sign;
+ 2910     ¦   }
+ 2911     }
+ 2912     return sign < 0 ? -1 : sign > 0 ? 1 : 0;
+ 2913 }
+ 2914 
 </code></pre>
 
 ## 参考  
