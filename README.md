@@ -77,7 +77,7 @@ PyObject是整个Python对象机制的核心:
 18 } PyFloatObject;
 </code></pre>
 *书中用int类型来举例，但是在Python3之后可能发生了点变化。*  
-> [Python3中的整数对象并入Long对象](https://zhuanlan.zhihu.com/p/27652878?utm_source=wechat_session&utm_medium=social)
+> [Python3中的整数对象并入Long对象](http://blog.csdn.net/wangyuquanliuli/article/details/8520115)
 
 PyLong_Type对象中的tp_name="int":
 <pre><code>
@@ -219,7 +219,154 @@ PyLongObject所支持的操作
  2912     return sign < 0 ? -1 : sign > 0 ? 1 : 0;
  2913 }
  2914 
+ </code></pre>
+
+### 2.2 PyLongObject对象的创建和维护
+#### 2.2.1 对象创建的途径
+<pre><code>
+PyObject *
+PyLong_FromLong(long ival)
+
+PyObject *
+PyLong_FromUnsignedLong(unsigned long ival)
+
+PyObject *
+PyLong_FromDouble(double dval)
+
+PyObject *
+PyLong_FromString(const char *str, char **pend, int base)
+
+PyObject *
+PyLong_FromUnicode(Py_UNICODE *u, Py_ssize_t length, int base)
 </code></pre>
 
+#### 2.2.2 小整数对象
+>在Python中，对小整数对象使用了对象池技术。
+<pre><code>
+#ifndef NSMALLPOSINTS
+#define NSMALLPOSINTS           257
+#endif
+#ifndef NSMALLNEGINTS
+#define NSMALLNEGINTS           5
+#endif
+
+...
+
+PyObject *_PyLong_Zero = NULL;
+PyObject *_PyLong_One = NULL;
+
+#if NSMALLNEGINTS + NSMALLPOSINTS > 0
+/* Small integers are preallocated in this array so that they
+   can be shared.
+   The integers that are preallocated are those in the range
+   -NSMALLNEGINTS (inclusive) to NSMALLPOSINTS (not inclusive).
+*/
+static PyLongObject small_ints[NSMALLNEGINTS + NSMALLPOSINTS];
+</code></pre>
+
+#### 2.2.3 大整数对象
+>而对其他整数，Python运行环境将提供一块内存空间，这些内存空间由这些大整数轮流使用，也就是说，谁需要的时候谁就使用。这样免去了不断地malloc之苦，又在一定程度上考虑了效率问题。
+
+**在Python3中，好像没看到PyIntBlock这个机制**
+
+#### 2.2.4 添加和删除
+<pre><code>
+/* Create a new int object from a C long int */
+
+PyObject *
+PyLong_FromLong(long ival)
+{
+    PyLongObject *v;
+    unsigned long abs_ival;
+    unsigned long t;  /* unsigned so >> doesn't propagate sign bit */
+    int ndigits = 0;
+    int sign;
+
+    CHECK_SMALL_INT(ival);  // 尝试使用小整数对象池
+
+    if (ival < 0) {
+        /* negate: can't write this as abs_ival = -ival since that
+           invokes undefined behaviour when ival is LONG_MIN */
+        abs_ival = 0U-(unsigned long)ival;
+        sign = -1;
+    }
+    else {
+        abs_ival = (unsigned long)ival;
+        sign = ival == 0 ? 0 : 1;
+    }
+
+    /* Fast path for single-digit ints */
+    if (!(abs_ival >> PyLong_SHIFT)) {
+        v = _PyLong_New(1);
+        if (v) {
+            Py_SIZE(v) = sign;
+            v->ob_digit[0] = Py_SAFE_DOWNCAST(
+                abs_ival, unsigned long, digit);
+        }
+        return (PyObject*)v;
+    }
+
+#if PyLong_SHIFT==15
+    /* 2 digits */
+    if (!(abs_ival >> 2*PyLong_SHIFT)) {
+        v = _PyLong_New(2);
+        if (v) {
+            Py_SIZE(v) = 2*sign;
+            v->ob_digit[0] = Py_SAFE_DOWNCAST(
+                abs_ival & PyLong_MASK, unsigned long, digit);
+            v->ob_digit[1] = Py_SAFE_DOWNCAST(
+                  abs_ival >> PyLong_SHIFT, unsigned long, digit);
+        }
+        return (PyObject*)v;
+    }
+#endif
+
+    /* Larger numbers: loop to determine number of digits */
+    t = abs_ival;
+    while (t) {
+        ++ndigits;
+        t >>= PyLong_SHIFT;
+    }
+    v = _PyLong_New(ndigits);
+    if (v != NULL) {
+        digit *p = v->ob_digit;
+        Py_SIZE(v) = ndigits*sign;
+        t = abs_ival;
+        while (t) {
+            *p++ = Py_SAFE_DOWNCAST(
+                t & PyLong_MASK, unsigned long, digit);
+            t >>= PyLong_SHIFT;
+        }
+    }
+    return (PyObject *)v;
+}
+</code></pre>
+
+CHECK_SMALL_INT(ival)的定义如下：
+<pre><code>
+static PyObject *
+get_small_int(sdigit ival)
+{
+    PyObject *v;
+    assert(-NSMALLNEGINTS <= ival && ival < NSMALLPOSINTS);
+    v = (PyObject *)&small_ints[ival + NSMALLNEGINTS];
+    Py_INCREF(v);
+#ifdef COUNT_ALLOCS
+    if (ival >= 0)
+        quick_int_allocs++;
+    else
+        quick_neg_int_allocs++;
+#endif
+    return v;
+}
+#define CHECK_SMALL_INT(ival) \
+    do if (-NSMALLNEGINTS <= ival && ival < NSMALLPOSINTS) { \
+        return get_small_int((sdigit)ival); \
+    } while(0)
+</code></pre>
+
+
 ## 参考  
-1. [<<Python源码解析>>](https://read.douban.com/reader/ebook/1499455/)
+1. [《Python源码解析》](https://read.douban.com/reader/ebook/1499455/)
+2. [对PyIntObject的认识(对象池)](http://blog.csdn.net/wangyuquanliuli/article/details/8520115)
+3. [python idle 解释和直接 python script.py 解释有什么差别？](https://www.zhihu.com/question/29089863)
