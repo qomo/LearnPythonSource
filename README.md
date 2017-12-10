@@ -365,6 +365,38 @@ get_small_int(sdigit ival)
     } while(0)
 </code></pre>
 
+看样子Python3去掉了大整数对象池(通用整数对象池)
+<pre><code>
+PyLongObject *
+_PyLong_New(Py_ssize_t size)
+{
+    PyLongObject *result;
+    /* Number of bytes needed is: offsetof(PyLongObject, ob_digit) +
+       sizeof(digit)*size.  Previous incarnations of this code used
+       sizeof(PyVarObject) instead of the offsetof, but this risks being
+       incorrect in the presence of padding between the PyVarObject header
+       and the digits. */
+    if (size > (Py_ssize_t)MAX_LONG_DIGITS) {
+        PyErr_SetString(PyExc_OverflowError,
+                        "too many digits in integer");
+        return NULL;
+    }
+    result = PyObject_MALLOC(offsetof(PyLongObject, ob_digit) +
+                             size*sizeof(digit));
+    if (!result) {
+        PyErr_NoMemory();
+        return NULL;
+    }
+    return (PyLongObject*)PyObject_INIT_VAR(result, &PyLong_Type, size);
+}
+</code></pre>
+
+##### 2.2.4.1 使用小整数对象池
+
+##### 2.2.4.2 创建通用整数对象池
+
+##### 2.2.4.3 使用通用整数对象池
+
 
 ## 参考  
 1. [《Python源码解析》](https://read.douban.com/reader/ebook/1499455/)
